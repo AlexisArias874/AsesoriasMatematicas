@@ -91,7 +91,7 @@ app.post("/webhook", async (req, res) => {
             await registrarEnSheets({ 
                 rama: temaInteres, 
                 pregunta: "Solicitó Asesoría", 
-                respuesta: "Correo enviado via EmailJS", 
+                respuesta: "Correo enviado exitosamente", 
                 estado: "Agendada",
                 es_asesoria: "SÍ",
                 email: emailUsuario
