@@ -1,0 +1,15 @@
+{
+  "name": "math-tutor-bot",
+  "version": "1.0.0",
+  "description": "Fulfillment para chatbot de matemáticas con Sheets y Pollinations AI",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.2",
+    "google-auth-library": "^9.4.1",
+    "google-spreadsheet": "^4.1.1"
+  }
+}
