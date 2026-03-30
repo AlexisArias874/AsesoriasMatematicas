@@ -14,24 +14,16 @@ const serviceAccountAuth = new JWT({
 });
 const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, serviceAccountAuth);
 
-// --- FUNCIÓN REGISTRAR EN SHEETS ---
-async function registrarEnSheets(datos) {
+// --- FUNCIÓN ÚNICA PARA REGISTRAR EN CUALQUIER HOJA ---
+async function registrarDato(nombreHoja, fila) {
     try {
         await doc.loadInfo();
-        const sheet = doc.sheetsByIndex[0];
-        await sheet.addRow({
-            "ID_Consulta": `MAT-${Date.now().toString().slice(-4)}`,
-            "Fecha": new Date().toLocaleString("es-MX", {timeZone: "America/Mexico_City"}),
-            "Usuario": "Alumno",
-            "Rama": datos.rama || "General",
-            "Pregunta": datos.pregunta || "Consulta",
-            "Respuesta_Bot": datos.respuesta || "Respuesta enviada",
-            "Estado": datos.estado || "Completado",
-            "Es_Asesoria": datos.es_asesoria || "No",
-            "Email_Usuario": datos.email || "N/A"
-        });
-        console.log("✅ Fila agregada a Sheets");
-    } catch (e) { console.error("❌ Error Sheets:", e.message); }
+        const sheet = doc.sheetsByTitle[nombreHoja]; // Busca la hoja por su nombre (Consultas o Asesorias)
+        await sheet.addRow(fila);
+        console.log(`✅ Registro guardado en la hoja: ${nombreHoja}`);
+    } catch (e) {
+        console.error(`❌ Error al guardar en ${nombreHoja}:`, e.message);
+    }
 }
 
 // --- WEBHOOK PRINCIPAL ---
@@ -39,29 +31,29 @@ app.post("/webhook", async (req, res) => {
     const { queryResult } = req.body;
     const intentName = queryResult.intent ? queryResult.intent.displayName : "Desconocido";
     const userQuery = queryResult.queryText;
+    const respuestaDialogflow = queryResult.fulfillmentText || "Sin respuesta.";
 
-    // IMPORTANTE: Atrapamos la respuesta que TÚ escribiste en Dialogflow
-    const respuestaDialogflow = queryResult.fulfillmentText || "No hay respuesta configurada.";
+    const fechaActual = new Date().toLocaleString("es-MX", {timeZone: "America/Mexico_City"});
+    const idGenerado = `MAT-${Date.now().toString().slice(-4)}`;
 
-    console.log(`--- Procesando Intent: ${intentName} ---`);
-
-    // 1. INTENT: Explicar_concepto (Sin Newton para evitar errores de texto)
+    // 1. INTENT: Explicar_concepto -> VA A LA HOJA "Consultas"
     if (intentName === "Explicar_concepto") {
         const tema = queryResult.parameters.tema_mate || "Matemáticas";
         
-        // Guardamos en Sheets lo que el bot respondió realmente
-        await registrarEnSheets({ 
-            rama: tema, 
-            pregunta: userQuery, 
-            respuesta: respuestaDialogflow, 
-            estado: "Resuelto",
-            es_asesoria: "No"
+        await registrarDato("Consultas", {
+            "ID_Consulta": idGenerado,
+            "Fecha": fechaActual,
+            "Usuario": "Alumno",
+            "Rama": tema,
+            "Pregunta": userQuery,
+            "Respuesta_Bot": respuestaDialogflow,
+            "Estado": "Resuelto"
         });
 
         return res.json({ fulfillmentText: respuestaDialogflow });
     }
 
-    // 2. INTENT: Recibir_datos_asesoria (EmailJS + Sheets)
+    // 2. INTENT: Recibir_datos_asesoria -> VA A LA HOJA "Asesorias"
     if (intentName === "Recibir_datos_asesoria") {
         const emailUsuario = queryResult.parameters.email;
         let temaInteres = "Matemáticas";
@@ -72,15 +64,15 @@ app.post("/webhook", async (req, res) => {
         }
 
         try {
-            // Enviar Correo con EmailJS
+            // Envío de EmailJS
             await emailjs.send(
                 process.env.EMAILJS_SERVICE_ID,
                 process.env.EMAILJS_TEMPLATE_ID,
                 {
                     user_email: emailUsuario,
                     tema_mate: temaInteres,
-                    id_consulta: Date.now().toString().slice(-4),
-                    fecha_actual: new Date().toLocaleString("es-MX")
+                    id_consulta: idGenerado,
+                    fecha_actual: fechaActual
                 },
                 {
                     publicKey: process.env.EMAILJS_PUBLIC_KEY,
@@ -88,13 +80,14 @@ app.post("/webhook", async (req, res) => {
                 }
             );
 
-            await registrarEnSheets({ 
-                rama: temaInteres, 
-                pregunta: "Solicitó Asesoría", 
-                respuesta: "Correo enviado exitosamente", 
-                estado: "Agendada",
-                es_asesoria: "SÍ",
-                email: emailUsuario
+            // REGISTRO EN LA HOJA DE ASESORÍAS
+            await registrarDato("Asesorias", {
+                "ID_Consulta": idGenerado,
+                "Fecha": fechaActual,
+                "Usuario": "Alumno",
+                "Tema": temaInteres,
+                "Email_Usuario": emailUsuario,
+                "Estado": "Agendada"
             });
 
             return res.json({ fulfillmentText: respuestaDialogflow });
@@ -105,9 +98,8 @@ app.post("/webhook", async (req, res) => {
         }
     }
 
-    // Para cualquier otro intent (Bienvenida, etc.)
     return res.json({ fulfillmentText: respuestaDialogflow });
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Bot listo en puerto ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Bot Multi-Hoja activo en puerto ${PORT}`));
