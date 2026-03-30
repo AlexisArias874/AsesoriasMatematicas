@@ -1,5 +1,4 @@
 const express = require("express");
-const axios = require("axios");
 const { JWT } = require('google-auth-library');
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 
@@ -29,9 +28,9 @@ async function registrarEnSheets(d) {
             "ID_Consulta": d.ID_Consulta, 
             "Fecha": new Date().toLocaleString("es-MX", {timeZone: "America/Mexico_City"}), 
             "Usuario": d.usuario,
-            "Rama": d.tema_mate, // <-- Aquí guardamos el parámetro de Dialogflow en la columna Rama
+            "Rama": d.tema_mate, 
             "Pregunta": d.pregunta, 
-            "Respuesta_Bot": d.respuesta_bot,
+            "Respuesta_Bot": d.respuesta_bot, // Aquí guardaremos lo que diga Dialogflow
             "Estado": "Resuelta"
         });
         console.log("✅ Guardado en Sheets:", d.ID_Consulta);
@@ -40,41 +39,19 @@ async function registrarEnSheets(d) {
     }
 }
 
-// --- 3. LÓGICA DE IA (PROFESOR DE MATEMÁTICAS) ---
-async function generarRespuestaIA(query, modo, info = {}) {
-    let systemPrompt = "";
-    
-    if (modo === "explicacion") {
-        systemPrompt = `Eres un profesor de matemáticas experto. El alumno tiene una duda sobre: ${info.tema}. Resuelve la duda: "${query}". Usa un lenguaje claro, didáctico y paso a paso. No uses Markdown complejo.`;
-    } else if (modo === "mas_facil") {
-        systemPrompt = `Eres un profesor de matemáticas muy paciente. El alumno no entendió la explicación anterior sobre "${query}". Explícalo como si fuera para un niño de 10 años, usa analogías de la vida real.`;
-    } else if (modo === "ejemplo") {
-        systemPrompt = `Eres un profesor de matemáticas. El alumno pidió un ejemplo sobre "${query}". Dame un problema práctico de la vida real, resuélvelo paso a paso y pregúntale si lo entendió.`;
-    } else if (modo === "despedida") {
-        systemPrompt = `Eres un profesor de matemáticas. Despídete del alumno, anímalo a seguir estudiando y usa algún emoji.`;
-    } else {
-        systemPrompt = "Eres un tutor de matemáticas amable. Responde brevemente.";
-    }
-
-    try {
-        const resp = await axios.get(`https://text.pollinations.ai/${encodeURIComponent(query)}`, {
-            params: { system: systemPrompt, model: "openai", seed: Math.floor(Math.random() * 1000) },
-            timeout: 20000 
-        });
-        return resp.data;
-    } catch (e) { 
-        console.error("⚠️ Timeout IA");
-        return `Mi cerebro matemático está calculando lento 🧠. ¿Podrías repetirme tu duda?`; 
-    }
-}
-
-// --- 4. WEBHOOK PARA DIALOGFLOW ---
+// --- 3. WEBHOOK PARA DIALOGFLOW (RAPIDEZ MÁXIMA) ---
 app.post("/webhook", async (req, res) => {
     const { queryResult } = req.body;
-    const intentName = queryResult.intent ? queryResult.intent.displayName : "Default Fallback Intent";
+    
+    // Extraemos los datos básicos de Dialogflow
+    const intentName = queryResult.intent ? queryResult.intent.displayName : "Desconocido";
     const userQuery = queryResult.queryText;
+    
+    // ¡AQUÍ ESTÁ LA MAGIA! 
+    // Atrapamos la respuesta que tú escribiste manualmente en la sección "Responses" de Dialogflow
+    const respuestaDeDialogflow = queryResult.fulfillmentText || "No tengo una respuesta configurada para esto.";
 
-    // Función para atrapar el parámetro "tema_mate" de tu Dialogflow
+    // Función para atrapar el parámetro (Álgebra, Aritmética, Geometría)
     const getDato = (nombre) => {
         let v = queryResult.parameters[nombre];
         if (v && typeof v === 'object' && v.name) v = v.name; 
@@ -82,63 +59,33 @@ app.post("/webhook", async (req, res) => {
     };
 
     try {
-        const usuario = "Alumno"; // Por ahora lo dejamos genérico
-        const temaMate = getDato("tema_mate") || "Matemáticas"; // <-- Atrapa "álgebra", "fracciones", etc.
+        const usuario = "Alumno"; 
+        const temaMate = getDato("tema_mate") || "General"; 
 
-        // 🟢 INTENT: Bienvenida
-        if (intentName === "Bienvenida") {
-            return res.json({ fulfillmentText: "¡Hola! Soy tu tutor virtual de matemáticas 🧮. Puedo ayudarte con álgebra, aritmética o geometría. ¿Qué tema te está costando trabajo hoy?" });
-        }
-
-        // 🟢 INTENT: Explicar_concepto (¡EL MÁS IMPORTANTE!)
+        // 🟢 SOLAMENTE guardamos en Excel si es el Intent "Explicar_concepto"
         if (intentName === "Explicar_concepto") {
             const idConsulta = generarID();
 
-            // 1. La IA genera la explicación
-            const explicacion = await generarRespuestaIA(userQuery, "explicacion", { tema: temaMate });
-
-            // 2. Guardamos en Google Sheets
+            // Guardamos en Google Sheets usando la respuesta nativa de Dialogflow
             await registrarEnSheets({ 
                 ID_Consulta: idConsulta, 
                 usuario: usuario, 
-                tema_mate: temaMate, // Se guarda como "Álgebra", "Aritmética", etc.
+                tema_mate: temaMate, 
                 pregunta: userQuery, 
-                respuesta_bot: explicacion 
-            });
-
-            // 3. Respondemos al usuario
-            return res.json({
-                fulfillmentText: `${explicacion}\n\n¿Te quedó claro o quieres que te dé un ejemplo?`
+                respuesta_bot: respuestaDeDialogflow // Mandamos el texto de Dialogflow al Excel
             });
         }
 
-        // 🟢 INTENT: No_entiendo
-        if (intentName === "No_entiendo") {
-            const explicacionFacil = await generarRespuestaIA(userQuery, "mas_facil", {});
-            return res.json({ fulfillmentText: `No te preocupes, vamos a verlo de otra forma:\n\n${explicacionFacil}` });
-        }
-
-        // 🟢 INTENT: Aceptar_ejemplo
-        if (intentName === "Aceptar_ejemplo") {
-            const ejemplo = await generarRespuestaIA(userQuery, "ejemplo", {});
-            return res.json({ fulfillmentText: `¡Claro! Aquí tienes un ejemplo práctico:\n\n${ejemplo}` });
-        }
-
-        // 🟢 INTENT: Despedida
-        if (intentName === "Despedida") {
-            const despedida = await generarRespuestaIA(userQuery, "despedida", {});
-            return res.json({ fulfillmentText: despedida });
-        }
-
-        // 🟡 FALLBACK (Si no entiende)
-        const respuestaBase = await generarRespuestaIA(userQuery, "general", {});
-        return res.json({ fulfillmentText: respuestaBase });
+        // Finalmente, le decimos a Dialogflow que muestre la respuesta que él mismo generó
+        return res.json({
+            fulfillmentText: respuestaDeDialogflow
+        });
 
     } catch (err) {
-        console.error(err);
-        return res.json({ fulfillmentText: "Hubo un error en mis circuitos. ¿Podrías decírmelo de nuevo?" });
+        console.error("Error en webhook:", err);
+        return res.json({ fulfillmentText: "Hubo un pequeño error al guardar tus datos, pero sigo aquí para ayudarte." });
     }
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Tutor matemático corriendo en puerto: ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Tutor matemático (Ultra Rápido) corriendo en puerto: ${PORT}`));
