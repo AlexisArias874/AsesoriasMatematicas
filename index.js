@@ -38,7 +38,7 @@ async function obtenerRespuestaIA(preguntaUsuario, tema) {
                 },
                 { role: "user", content: preguntaUsuario }
             ],
-            model: "llama-3.3-70b-versatile", // El modelo actual y más potente
+            model: "llama-3.1-8b-instant", // El modelo actual y más potente
             temperature: 0.6,
             max_tokens: 1024
         });
